@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MediBot – Medical Chatbot</title>
+  <meta name="description" content="Clean, responsive medical chatbot UI" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <main class="shell" role="main">
+    <header class="header" aria-label="App header">
+      <div class="brand">
+        <div class="avatar" aria-hidden="true">🩺</div>
+        <div>
+          <div class="title">MediBot</div>
+          <div class="subtitle">Educational medical assistant • Not a substitute for professional care</div>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button class="btn" id="toggleTheme" aria-label="Toggle theme">Toggle theme</button>
+        <button class="btn" id="clearChat" aria-label="Clear chat">Clear</button>
+      </div>
+    </header>
+
+    <section class="card" aria-label="Chat window">
+      <div class="bar">
+        <div class="status"><span class="dot" aria-hidden="true"></span> Online</div>
+      </div>
+
+      <div id="messages" class="messages" aria-live="polite" aria-atomic="false"></div>
+
+      <div class="input">
+        <label class="sr-only" for="prompt">Message MediBot</label>
+        <textarea id="prompt" placeholder="Ask a medical question (educational use only)…" rows="1"></textarea>
+        <button id="send" class="send">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M3.4 20.6 22 12 3.4 3.4 3 10l12 2-12 2 .4 6.6Z" stroke="#07243f" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Send
+        </button>
+      </div>
+    </section>
+
+    <p class="disclaimer">MediBot provides general, educational information and does not replace a licensed clinician. For emergencies, call your local emergency number.</p>
+  </main>
+
+  <script>
+    // ---------- Helpers ----------
+    const qs = (s, el = document) => el.querySelector(s);
+    const messagesEl = qs('#messages');
+    const promptEl = qs('#prompt');
+    const sendBtn = qs('#send');
+
+    function escapeHtml(s) {
+      return s.replace(/[&<>"]/g, c =>
+        ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])
+      );
+    }
+
+    function appendMessage({ role, html, text }) {
+      const wrap = document.createElement('div');
+      wrap.className = `msg ${role === 'user' ? 'user' : 'bot'}`;
+      const avatar = document.createElement('div');
+      avatar.className = `avatar-sm ${role === 'user' ? 'user' : ''}`;
+      avatar.textContent = role === 'user' ? '🧑' : '🩺';
+      const bubble = document.createElement('div');
+      bubble.className = 'bubble';
+      bubble.innerHTML = html || `<div>${escapeHtml(text || '')}</div>`;
+      wrap.appendChild(role === 'user' ? bubble : avatar);
+      wrap.appendChild(role === 'user' ? avatar : bubble);
+      messagesEl.appendChild(wrap);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+      return bubble;
+    }
+
+    // Typing indicator
+    function addTyping() {
+      const bubble = appendMessage({ role: 'bot', html: '<div class="typing"><span></span><span></span><span></span></div>' });
+      return () => bubble.parentElement?.remove();
+    }
+
+    // Auto-grow textarea
+    function autoResize() {
+      promptEl.style.height = 'auto';
+      promptEl.style.height = Math.min(promptEl.scrollHeight, 140) + 'px';
+    }
+    promptEl.addEventListener('input', autoResize);
+
+    // Seed greeting
+    appendMessage({ role: 'bot', text: 'Hi! I’m MediBot. Ask a medical question, and I’ll answer using your knowledge base. (This is for education, not diagnosis.)' });
+
+    // ---------- Theme toggle (default dark, remember choice) ----------
+    const toggleBtn = qs('#toggleTheme');
+    const THEME_KEY = 'medibot-theme';
+    function setTheme(mode){
+      document.documentElement.dataset.theme = mode;
+      localStorage.setItem(THEME_KEY, mode);
+    }
+    toggleBtn.addEventListener('click', () => {
+      const current = document.documentElement.dataset.theme || 'dark';
+      setTheme(current === 'dark' ? 'light' : 'dark');
+    });
+    (function(){  // default to dark unless user saved choice
+      const saved = localStorage.getItem(THEME_KEY);
+      setTheme(saved || 'dark');
+    })();
+
+    // ---------- Send handler (wired to Flask /get) ----------
+    async function onSend(){
+      const text = promptEl.value.trim();
+      if(!text) return;
+      promptEl.value = ''; autoResize();
+      appendMessage({ role: 'user', text });
+
+      const removeTyping = addTyping();
+
+      try {
+        const res = await fetch('/get', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+          body: new URLSearchParams({ msg: text })
+        });
+
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const answer = await res.text();
+
+        removeTyping();
+        appendMessage({ role: 'bot', text: answer });
+      } catch (e) {
+        removeTyping();
+        appendMessage({ role: 'bot', html: `<strong style="color: var(--danger)">Error:</strong> ${escapeHtml(e.message || 'Something went wrong')}` });
+      }
+    }
+
+    sendBtn.addEventListener('click', onSend);
+    promptEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onSend(); }
+    });
+
+    // Clear chat
+    qs('#clearChat').addEventListener('click', () => {
+      messagesEl.innerHTML = '';
+      appendMessage({ role: 'bot', text: 'Chat cleared. How can I help?' });
+    });
+  </script>
+</body>
+</html>
